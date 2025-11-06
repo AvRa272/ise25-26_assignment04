@@ -12,6 +12,9 @@ spring:
 logging:
   file:
     name: campus-coffee.log
+  level:
+    de.seuhd.campuscoffee.data.impl.OsmDataServiceImpl: DEBUG
+    org.springframework.web.client: DEBUG
 server:
   error:
     whitelabel:

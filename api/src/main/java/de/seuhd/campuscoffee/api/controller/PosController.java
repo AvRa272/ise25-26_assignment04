@@ -4,6 +4,7 @@ import de.seuhd.campuscoffee.api.dtos.PosDto;
 import de.seuhd.campuscoffee.api.mapper.PosDtoMapper;
 import de.seuhd.campuscoffee.domain.ports.PosService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +19,7 @@ import java.util.List;
 @Controller
 @RequestMapping("/api/pos")
 @RequiredArgsConstructor
+@Slf4j
 public class PosController {
     private final PosService posService;
     private final PosDtoMapper posDtoMapper;
@@ -51,9 +53,11 @@ public class PosController {
     @PostMapping("/import/osm/{nodeId}")
     public ResponseEntity<PosDto> create(
             @PathVariable Long nodeId) {
+        log.info("Controller received OSM import request for node ID: {}", nodeId);
         PosDto created = posDtoMapper.fromDomain(
                 posService.importFromOsmNode(nodeId)
         );
+        log.info("Controller successfully processed OSM import for node ID: {}", nodeId);
         return ResponseEntity
                 .created(getLocation(created.id()))
                 .body(created);

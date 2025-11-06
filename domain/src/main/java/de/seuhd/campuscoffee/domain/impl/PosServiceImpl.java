@@ -81,23 +81,220 @@ public class PosServiceImpl implements PosService {
 
     /**
      * Converts an OSM node to a POS domain object.
-     * Note: This is a stub implementation and should be replaced with real mapping logic.
+     * <p>
+     * This method validates that all required fields are present in the OSM node,
+     * maps OSM amenity types to POS types, determines the campus based on coordinates,
+     * and constructs a complete POS object ready for persistence.
+     *
+     * @param osmNode the OSM node containing location and tag data
+     * @return a fully populated POS domain object
+     * @throws OsmNodeMissingFieldsException if required fields are missing
      */
     private @NonNull Pos convertOsmNodeToPos(@NonNull OsmNode osmNode) {
-        if (osmNode.nodeId().equals(5589879349L)) {
-            return Pos.builder()
-                    .name("Rada Coffee & Rösterei")
-                    .description("Caffé und Rösterei")
-                    .type(PosType.CAFE)
-                    .campus(CampusType.ALTSTADT)
-                    .street("Untere Straße")
-                    .houseNumber("21")
-                    .postalCode(69117)
-                    .city("Heidelberg")
-                    .build();
-        } else {
-            throw new OsmNodeMissingFieldsException(osmNode.nodeId());
+        log.debug("Converting OSM node {} to POS", osmNode.nodeId());
+
+        // Validate required fields
+        validateRequiredFields(osmNode);
+
+        // Extract and map fields
+        String name = osmNode.name();
+        String description = extractDescription(osmNode);
+        PosType type = mapAmenityToType(osmNode.amenity());
+        CampusType campus = determineCampus(osmNode.latitude(), osmNode.longitude());
+        String street = osmNode.street();
+        String houseNumber = osmNode.houseNumber();
+        Integer postalCode = parsePostalCode(osmNode.postcode());
+        String city = osmNode.city();
+
+        return Pos.builder()
+                .name(name)
+                .description(description)
+                .type(type)
+                .campus(campus)
+                .street(street)
+                .houseNumber(houseNumber)
+                .postalCode(postalCode)
+                .city(city)
+                .build();
+    }
+
+    /**
+     * Validates that all required fields for creating a POS are present in the OSM node.
+     * <p>
+     * Required fields:
+     * <ul>
+     *   <li>name - The establishment's name</li>
+     *   <li>addr:street - Street address</li>
+     *   <li>addr:housenumber - House number</li>
+     *   <li>addr:postcode - Postal code</li>
+     *   <li>addr:city - City name</li>
+     * </ul>
+     *
+     * @param osmNode the OSM node to validate
+     * @throws OsmNodeMissingFieldsException if any required field is missing
+     */
+    private void validateRequiredFields(@NonNull OsmNode osmNode) {
+        List<String> missingFields = new java.util.ArrayList<>();
+
+        if (osmNode.name() == null || osmNode.name().isEmpty()) {
+            missingFields.add("name");
         }
+        if (osmNode.street() == null || osmNode.street().isEmpty()) {
+            missingFields.add("addr:street");
+        }
+        if (osmNode.houseNumber() == null || osmNode.houseNumber().isEmpty()) {
+            missingFields.add("addr:housenumber");
+        }
+        if (osmNode.postcode() == null || osmNode.postcode().isEmpty()) {
+            missingFields.add("addr:postcode");
+        }
+        if (osmNode.city() == null || osmNode.city().isEmpty()) {
+            missingFields.add("addr:city");
+        }
+
+        if (!missingFields.isEmpty()) {
+            log.warn("OSM node {} is missing required fields: {}", osmNode.nodeId(), missingFields);
+            throw new OsmNodeMissingFieldsException(osmNode.nodeId(), missingFields);
+        }
+    }
+
+    /**
+     * Maps OSM amenity tag to POS type.
+     * <p>
+     * Mapping:
+     * <ul>
+     *   <li>"cafe" → CAFE</li>
+     *   <li>"bakery" → BAKERY</li>
+     *   <li>"restaurant", "fast_food" → CAFETERIA</li>
+     *   <li>"vending_machine" → VENDING_MACHINE</li>
+     *   <li>null or unknown → CAFE (default)</li>
+     * </ul>
+     *
+     * @param amenity the OSM amenity tag value (may be null)
+     * @return the corresponding POS type
+     */
+    private PosType mapAmenityToType(String amenity) {
+        if (amenity == null) {
+            log.debug("No amenity tag found, defaulting to CAFE");
+            return PosType.CAFE;
+        }
+
+        return switch (amenity.toLowerCase()) {
+            case "cafe" -> PosType.CAFE;
+            case "bakery" -> PosType.BAKERY;
+            case "restaurant", "fast_food" -> PosType.CAFETERIA;
+            case "vending_machine" -> PosType.VENDING_MACHINE;
+            default -> {
+                log.debug("Unknown amenity type '{}', defaulting to CAFE", amenity);
+                yield PosType.CAFE;
+            }
+        };
+    }
+
+    /**
+     * Determines campus based on geographical coordinates.
+     * <p>
+     * Uses simple bounding box approach for Heidelberg campuses:
+     * <ul>
+     *   <li>Altstadt: latitude 49.408-49.414, longitude 8.705-8.715</li>
+     *   <li>Bergheim: latitude 49.412-49.418, longitude 8.665-8.680</li>
+     *   <li>INF (Neuenheimer Feld): latitude 49.415-49.425, longitude 8.665-8.675</li>
+     * </ul>
+     * <p>
+     * Note: This is a simplified implementation. For production use, consider
+     * using a proper geospatial library or service.
+     *
+     * @param latitude the latitude coordinate
+     * @param longitude the longitude coordinate
+     * @return the determined campus type
+     */
+    private CampusType determineCampus(Double latitude, Double longitude) {
+        // Altstadt campus (city center)
+        if (latitude >= 49.408 && latitude <= 49.414 &&
+            longitude >= 8.705 && longitude <= 8.715) {
+            log.debug("Coordinates match Altstadt campus");
+            return CampusType.ALTSTADT;
+        }
+
+        // Bergheim campus
+        if (latitude >= 49.412 && latitude <= 49.418 &&
+            longitude >= 8.665 && longitude <= 8.680) {
+            log.debug("Coordinates match Bergheim campus");
+            return CampusType.BERGHEIM;
+        }
+
+        // INF campus (Neuenheimer Feld)
+        if (latitude >= 49.415 && latitude <= 49.425 &&
+            longitude >= 8.665 && longitude <= 8.675) {
+            log.debug("Coordinates match INF campus");
+            return CampusType.INF;
+        }
+
+        // Default to Altstadt if no match
+        log.debug("Coordinates don't match known campus, defaulting to Altstadt");
+        return CampusType.ALTSTADT;
+    }
+
+    /**
+     * Parses postal code string to integer.
+     * <p>
+     * Handles various formats and returns null if parsing fails.
+     *
+     * @param postcode the postal code string from OSM (may be null)
+     * @return the parsed integer postal code, or null if invalid
+     */
+    private Integer parsePostalCode(String postcode) {
+        if (postcode == null || postcode.isEmpty()) {
+            return null;
+        }
+
+        try {
+            return Integer.parseInt(postcode.trim());
+        } catch (NumberFormatException e) {
+            log.warn("Invalid postal code format: '{}', returning null", postcode);
+            return null;
+        }
+    }
+
+    /**
+     * Generates a description from available OSM data.
+     * <p>
+     * Combines amenity type and cuisine information if available.
+     * Falls back to a generic message if no descriptive data is present.
+     * <p>
+     * Examples:
+     * <ul>
+     *   <li>amenity="cafe", cuisine="coffee_shop" → "Cafe - coffee_shop"</li>
+     *   <li>amenity="bakery", cuisine=null → "Bakery"</li>
+     *   <li>amenity=null, cuisine=null → "Imported from OpenStreetMap"</li>
+     * </ul>
+     *
+     * @param osmNode the OSM node containing tag data
+     * @return a descriptive string for the POS
+     */
+    private String extractDescription(@NonNull OsmNode osmNode) {
+        StringBuilder desc = new StringBuilder();
+
+        if (osmNode.amenity() != null && !osmNode.amenity().isEmpty()) {
+            // Capitalize first letter of amenity type
+            String amenity = osmNode.amenity();
+            desc.append(Character.toUpperCase(amenity.charAt(0)))
+                .append(amenity.substring(1).replace('_', ' '));
+        }
+
+        if (osmNode.cuisine() != null && !osmNode.cuisine().isEmpty()) {
+            if (desc.length() > 0) {
+                desc.append(" - ");
+            }
+            desc.append(osmNode.cuisine().replace('_', ' '));
+        }
+
+        // Fallback to generic description if nothing was found
+        if (desc.length() == 0) {
+            return "Imported from OpenStreetMap";
+        }
+
+        return desc.toString();
     }
 
     /**
